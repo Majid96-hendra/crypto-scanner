@@ -23,7 +23,6 @@ def crypto_scanner():
     
     try:
         markets = exchange.load_markets()
-        # Filter khusus koin USDT Binance Futures
         symbols = [s for s in markets if s.endswith('/USDT') and not ':USDT' in s and markets[s]['active']]
     except Exception as e:
         print("Gagal memuat market:", e)
@@ -33,14 +32,12 @@ def crypto_scanner():
 
     for symbol in symbols:
         try:
-            # Ambil data 24 jam terakhir (timeframe 1 jam)
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=24)
             if len(ohlcv) < 24:
                 continue
                 
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             
-            # Analisis tren sebelum candle terakhir
             harga_sekarang = df['close'].iloc[-1]
             open_terakhir = df['open'].iloc[-1]
             high_terakhir = df['high'].iloc[-1]
@@ -50,14 +47,11 @@ def crypto_scanner():
             volume_rata2 = df['volume'].iloc[:-1].mean()
             volume_terakhir = df['volume'].iloc[-1]
             
-            # Kriteria Volume Meledak di Candle Terakhir
             if volume_terakhir > (volume_rata2 * 2.5):
-                
-                # --- STRATEGI LONG REVERSAL (Pantulan dari Bawah) ---
-                # Kondisi: Sebelumnya tren turun (-3% kebawah), tapi candle terakhir hijau & ada tekanan beli
+                # LONG REVERSAL
                 if perubahan_sebelumnya < -2.5 and harga_sekarang > open_terakhir:
                     entry = harga_sekarang
-                    sl = low_terakhir * 0.992  # Sedikit di bawah low candle terakhir
+                    sl = low_terakhir * 0.992
                     risiko = entry - sl
                     if risiko <= 0: continue
                     
@@ -69,17 +63,14 @@ def crypto_scanner():
                     skor_potensi = abs(perubahan_sebelumnya) * (volume_terakhir / volume_rata2)
                     sinyal_list.append({
                         'tipe': '🟢 *POTENSI LONG (REVERSAL)*',
-                        'symbol': symbol,
-                        'entry': entry,
-                        'sl': sl, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'tp_max': tp_max,
-                        'skor': skor_potensi
+                        'symbol': symbol, 'entry': entry, 'sl': sl, 
+                        'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'tp_max': tp_max, 'skor': skor_potensi
                     })
 
-                # --- STRATEGI SHORT REVERSAL (Rejeksi dari Atas) ---
-                # Kondisi: Sebelumnya tren naik (+3% ke atas), tapi candle terakhir merah / ada tekanan jual kuat
+                # SHORT REVERSAL
                 elif perubahan_sebelumnya > 2.5 and harga_sekarang < open_terakhir:
                     entry = harga_sekarang
-                    sl = high_terakhir * 1.008 # Sedikit di atas high candle terakhir
+                    sl = high_terakhir * 1.008
                     risiko = sl - entry
                     if risiko <= 0: continue
                     
@@ -88,18 +79,15 @@ def crypto_scanner():
                     tp3 = entry - (risiko * 4.0)
                     tp_max = entry - (risiko * 6.0)
                     
-                    skor_potensi = abs(perubahan_persen_sebelumnya = perubahan_sebelumnya) * (volume_terakhir / volume_rata2)
+                    skor_potensi = abs(perubahan_sebelumnya) * (volume_terakhir / volume_rata2)
                     sinyal_list.append({
                         'tipe': '🔴 *POTENSI SHORT (REJEKSI)*',
-                        'symbol': symbol,
-                        'entry': entry,
-                        'sl': sl, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'tp_max': tp_max,
-                        'skor': skor_potensi
+                        'symbol': symbol, 'entry': entry, 'sl': sl, 
+                        'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'tp_max': tp_max, 'skor': skor_potensi
                     })
         except Exception:
             continue
 
-    # Urutkan berdasarkan potensi skor tertinggi dan ambil maksimal 8 koin terbaik
     sinyal_list = sorted(sinyal_list, key=lambda x: x['skor'], reverse=True)[:8]
 
     if len(sinyal_list) > 0:
@@ -118,6 +106,7 @@ def crypto_scanner():
         kirim_telegram(laporan)
         print("Sinyal Reversal berhasil dikirim!")
     else:
+        # Kirim notifikasi jika ingin memastikan bot aktif atau biarkan kosong jika ingin bersih
         print("Belum ada koin yang masuk kriteria reversal ekstrem.")
 
 if __name__ == "__main__":
