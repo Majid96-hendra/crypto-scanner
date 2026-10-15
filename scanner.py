@@ -10,12 +10,16 @@ def kirim_telegram(pesan):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": pesan, "parse_mode": "Markdown"}
     try:
-        requests.post(url, json=payload)
+        response = requests.post(url, json=payload)
+        print("Status kirim Telegram:", response.status_code)
     except Exception as e:
         print("Gagal kirim Telegram:", e)
 
 def crypto_scanner():
-    print("Memindai pasar Binance Futures untuk Sinyal Reversal...")
+    print("Memulai scanner dan mengirim tes koneksi...")
+    # Pesan tes agar kita tahu bot dan Telegram sudah terhubung
+    kirim_telegram("🟢 *BOT TEST:* Scanner aktif dan Telegram berhasil terhubung!")
+
     exchange = ccxt.binance({
         'options': {'defaultType': 'future'},
         'enableRateLimit': True
@@ -104,10 +108,6 @@ def crypto_scanner():
             laporan += "-----------------------------------\n"
         
         kirim_telegram(laporan)
-        print("Sinyal Reversal berhasil dikirim!")
-    else:
-        # Kirim notifikasi jika ingin memastikan bot aktif atau biarkan kosong jika ingin bersih
-        print("Belum ada koin yang masuk kriteria reversal ekstrem.")
 
 if __name__ == "__main__":
     crypto_scanner()
