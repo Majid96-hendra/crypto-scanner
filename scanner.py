@@ -15,7 +15,7 @@ def kirim_telegram(pesan):
         print("Gagal kirim Telegram:", e)
 
 def crypto_scanner():
-    print("Memindai pasar Binance Futures...")
+    print("Memindai pasar Binance Futures untuk Sinyal Reversal...")
     exchange = ccxt.binance({
         'options': {'defaultType': 'future'},
         'enableRateLimit': True
@@ -23,49 +23,102 @@ def crypto_scanner():
     
     try:
         markets = exchange.load_markets()
-        symbols = [s for s in markets if s.endswith('/USDT') and not ':USDT' in s]
+        # Filter khusus koin USDT Binance Futures
+        symbols = [s for s in markets if s.endswith('/USDT') and not ':USDT' in s and markets[s]['active']]
     except Exception as e:
         print("Gagal memuat market:", e)
         return
 
-    laporan = "🚨 *CRYPTO SCANNER ALERT (BINANCE)* 🚨\n\n"
-    ditemukan = 0
+    sinyal_list = []
 
-    count = 0
     for symbol in symbols:
-        if count >= 80:
-            break
         try:
+            # Ambil data 24 jam terakhir (timeframe 1 jam)
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=24)
             if len(ohlcv) < 24:
                 continue
                 
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             
-            harga_awal = df['close'].iloc[0]
+            # Analisis tren sebelum candle terakhir
             harga_sekarang = df['close'].iloc[-1]
-            perubahan_persen = ((harga_sekarang - harga_awal) / harga_awal) * 100
+            open_terakhir = df['open'].iloc[-1]
+            high_terakhir = df['high'].iloc[-1]
+            low_terakhir = df['low'].iloc[-1]
             
-            volume_rata2 = df['volume'].mean()
+            perubahan_sebelumnya = ((df['close'].iloc[-2] - df['close'].iloc[0]) / df['close'].iloc[0]) * 100
+            volume_rata2 = df['volume'].iloc[:-1].mean()
             volume_terakhir = df['volume'].iloc[-1]
             
-            if volume_terakhir > (volume_rata2 * 3):
-                if perubahan_persen > 3.5:
-                    ditemukan += 1
-                    laporan += f"🟢 *POTENSI LONG* \nCoin: `{symbol}`\nKenaikan: `+{perubahan_persen:.2f}%`\nVolume Meledak! 🚀\n\n"
-                elif perubahan_persen < -3.5:
-                    ditemukan += 1
-                    laporan += f"🔴 *POTENSI SHORT* \nCoin: `{symbol}`\nPenurunan: `{perubahan_persen:.2f}%`\nDump / Tekanan Jual Kuat! ⚠️\n\n"
-            
-            count += 1
+            # Kriteria Volume Meledak di Candle Terakhir
+            if volume_terakhir > (volume_rata2 * 2.5):
+                
+                # --- STRATEGI LONG REVERSAL (Pantulan dari Bawah) ---
+                # Kondisi: Sebelumnya tren turun (-3% kebawah), tapi candle terakhir hijau & ada tekanan beli
+                if perubahan_sebelumnya < -2.5 and harga_sekarang > open_terakhir:
+                    entry = harga_sekarang
+                    sl = low_terakhir * 0.992  # Sedikit di bawah low candle terakhir
+                    risiko = entry - sl
+                    if risiko <= 0: continue
+                    
+                    tp1 = entry + (risiko * 1.5)
+                    tp2 = entry + (risiko * 2.5)
+                    tp3 = entry + (risiko * 4.0)
+                    tp_max = entry + (risiko * 6.0)
+                    
+                    skor_potensi = abs(perubahan_sebelumnya) * (volume_terakhir / volume_rata2)
+                    sinyal_list.append({
+                        'tipe': '🟢 *POTENSI LONG (REVERSAL)*',
+                        'symbol': symbol,
+                        'entry': entry,
+                        'sl': sl, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'tp_max': tp_max,
+                        'skor': skor_potensi
+                    })
+
+                # --- STRATEGI SHORT REVERSAL (Rejeksi dari Atas) ---
+                # Kondisi: Sebelumnya tren naik (+3% ke atas), tapi candle terakhir merah / ada tekanan jual kuat
+                elif perubahan_sebelumnya > 2.5 and harga_sekarang < open_terakhir:
+                    entry = harga_sekarang
+                    sl = high_terakhir * 1.008 # Sedikit di atas high candle terakhir
+                    risiko = sl - entry
+                    if risiko <= 0: continue
+                    
+                    tp1 = entry - (risiko * 1.5)
+                    tp2 = entry - (risiko * 2.5)
+                    tp3 = entry - (risiko * 4.0)
+                    tp_max = entry - (risiko * 6.0)
+                    
+                    skor_potensi = abs(perubahan_persen_sebelumnya = perubahan_sebelumnya) * (volume_terakhir / volume_rata2)
+                    sinyal_list.append({
+                        'tipe': '🔴 *POTENSI SHORT (REJEKSI)*',
+                        'symbol': symbol,
+                        'entry': entry,
+                        'sl': sl, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'tp_max': tp_max,
+                        'skor': skor_potensi
+                    })
         except Exception:
             continue
 
-    if ditemukan > 0:
+    # Urutkan berdasarkan potensi skor tertinggi dan ambil maksimal 8 koin terbaik
+    sinyal_list = sorted(sinyal_list, key=lambda x: x['skor'], reverse=True)[:8]
+
+    if len(sinyal_list) > 0:
+        laporan = "🚨 *BINANCE FUTURES REVERSAL SCANNER* 🚨\n*Fokus Pembalikan Arah & Titik TP/SL*\n\n"
+        for s in sinyal_list:
+            laporan += f"{s['tipe']}\n"
+            laporan += f"🪙 Pair: `{s['symbol']}`\n"
+            laporan += f"📍 **Entry:** `{s['entry']:.4f}`\n"
+            laporan += f"🛑 **SL:** `{s['sl']:.4f}`\n"
+            laporan += f"🎯 **TP 1:** `{s['tp1']:.4f}`\n"
+            laporan += f"🎯 **TP 2:** `{s['tp2']:.4f}`\n"
+            laporan += f"🎯 **TP 3:** `{s['tp3']:.4f}`\n"
+            laporan += f"🚀 **TP Max:** `{s['tp_max']:.4f}`\n"
+            laporan += "-----------------------------------\n"
+        
         kirim_telegram(laporan)
-        print("Sinyal berhasil dikirim ke Telegram!")
+        print("Sinyal Reversal berhasil dikirim!")
     else:
-        print("Belum ada koin yang memenuhi kriteria ekstrem.")
+        print("Belum ada koin yang masuk kriteria reversal ekstrem.")
 
 if __name__ == "__main__":
     crypto_scanner()
