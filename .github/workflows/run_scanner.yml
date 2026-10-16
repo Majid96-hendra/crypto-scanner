@@ -2,11 +2,9 @@ name: Auto Crypto Scanner
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    # Menjalankan bot setiap 30 menit sekali (menit ke-0 dan ke-30)
+    - cron: '0,30 * * * *'
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   run-scanner:
@@ -24,7 +22,7 @@ jobs:
         run: |
           pip install ccxt pandas requests
 
-      - name: Run script
+      - name: Run scanner script
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
