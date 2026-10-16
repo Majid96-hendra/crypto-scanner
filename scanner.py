@@ -16,7 +16,7 @@ def kirim_telegram(pesan):
         print("Gagal kirim Telegram:", e)
 
 def crypto_scanner():
-    print("Memulai scanner Binance Futures (Short Exhaustion - Tanpa Batas Jumlah)...")
+    print("Memulai scanner Binance Futures (Timeframe 15m - Short Exhaustion)...")
 
     exchange = ccxt.binance({
         'options': {'defaultType': 'future'},
@@ -34,7 +34,8 @@ def crypto_scanner():
 
     for symbol in symbols:
         try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=24)
+            # DIUBAH KE TIMEFRAME 15 MENIT AGAR SAMA DENGAN CHART UTAMAMU
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe='15m', limit=24)
             if len(ohlcv) < 24:
                 continue
                 
@@ -45,13 +46,14 @@ def crypto_scanner():
             high_terakhir = df['high'].iloc[-1]
             low_terakhir = df['low'].iloc[-1]
             
+            # Perhitungan kenaikan dalam beberapa candle terakhir di 15m
             kenaikan_sebelumnya = ((df['close'].iloc[-2] - df['close'].iloc[0]) / df['close'].iloc[0]) * 100
             volume_rata2 = df['volume'].iloc[:-1].mean()
             volume_terakhir = df['volume'].iloc[-1]
             
-            # Kriteria Short Exhaustion yang lebih fleksibel
-            if volume_terakhir > (volume_rata2 * 1.8):
-                if kenaikan_sebelumnya > 2.5 and harga_sekarang < open_terakhir:
+            # Kriteria Short Exhaustion di Timeframe 15m
+            if volume_terakhir > (volume_rata2 * 1.5):
+                if kenaikan_sebelumnya > 2.0 and harga_sekarang < open_terakhir:
                     entry = harga_sekarang
                     sl = high_terakhir * 1.008
                     risiko = sl - entry
@@ -64,18 +66,17 @@ def crypto_scanner():
                     
                     skor_potensi = kenaikan_sebelumnya * (volume_terakhir / volume_rata2)
                     sinyal_list.append({
-                        'tipe': '🔴 *SETUP SHORT EXHAUSTION*',
+                        'tipe': '🔴 *SETUP SHORT EXHAUSTION (15M)*',
                         'symbol': symbol, 'entry': entry, 'sl': sl, 
                         'tp1': tp1, 'tp2': tp2, 'tp3': tp3, 'tp_max': tp_max, 'skor': skor_potensi
                     })
         except Exception:
             continue
 
-    # DIHAPUS BATASANNYA: Mengirimkan SEMUA koin yang valid tanpa dibatasi maksimal 5
     sinyal_list = sorted(sinyal_list, key=lambda x: x['skor'], reverse=True)
 
     if len(sinyal_list) > 0:
-        laporan = f"🚨 *BINANCE FUTURES SHORT SCANNER* 🚨\n*Ditemukan {len(sinyal_list)} Koin Potensial*\n\n"
+        laporan = f"🚨 *BINANCE FUTURES SHORT SCANNER (15M)* 🚨\n*Ditemukan {len(sinyal_list)} Koin Potensial*\n\n"
         for s in sinyal_list:
             laporan += f"{s['tipe']}\n"
             laporan += f"🪙 Pair: `{s['symbol']}`\n"
@@ -89,7 +90,7 @@ def crypto_scanner():
         
         kirim_telegram(laporan)
     else:
-        print("Scan selesai: Belum ada koin yang memenuhi kriteria.")
+        print("Scan selesai: Belum ada koin 15m yang memenuhi kriteria.")
 
 if __name__ == "__main__":
     crypto_scanner()
