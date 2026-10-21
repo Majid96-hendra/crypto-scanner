@@ -1,30 +1,26 @@
-name: Auto Crypto Scanner
+name: Auto Scan Crypto LONG 15 Min
 
 on:
   schedule:
-    # Menjalankan bot setiap 30 menit sekali (menit ke-0 dan ke-30)
-    - cron: '0,30 * * * *'
-  workflow_dispatch:
+    - cron: '*/15 * * * *' # Berjalan otomatis setiap 15 menit
+  workflow_dispatch: # Agar bisa ditekan/run manual dari menu Actions GitHub
 
 jobs:
-  run-scanner:
+  run-long-scanner:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           pip install ccxt pandas requests
 
-      - name: Run scanner script
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+      - name: Run Scanner Script
         run: |
           python scanner.py
