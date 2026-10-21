@@ -4,7 +4,7 @@ import ccxt
 import pandas as pd
 from datetime import datetime
 
-# Token Bot Telegram dan Chat ID yang baru
+# Token Bot Telegram dan Chat ID kamu
 TELEGRAM_TOKEN = "8812904478:AAGg1o5vg8l0GHaDLhMidknBTGU5PL22_hg"
 CHAT_ID = "8626570783"
 
@@ -28,16 +28,9 @@ def hitung_rsi(series, period=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def hitung_macd(series, fast=12, slow=26, signal=9):
-    exp1 = series.ewm(span=fast, adjust=False).mean()
-    exp2 = series.ewm(span=slow, adjust=False).mean()
-    macd_line = exp1 - exp2
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    return macd_line, signal_line
-
-def scan_pasar_long():
+def scan_pasar_long_diperbaiki():
     waktu_sekarang = datetime.now().strftime("%Y-%m-%d %H:%M")
-    print(f"Memulai pemindaian Crypto LONG Reversal pada {waktu_sekarang}...")
+    print(f"Memulai pemindaian Crypto LONG Rebound pada {waktu_sekarang}...")
     sinyal_ditemukan = []
 
     try:
@@ -52,19 +45,12 @@ def scan_pasar_long():
                 if len(ohlcv) < 50: continue
                 df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 
-                # 1. Hitung Indikator (RSI & MACD)
+                # Hitung RSI 14
                 df['rsi'] = hitung_rsi(df['close'], 14)
-                df['macd'], df['signal'] = hitung_macd(df['close'])
-                
                 if len(df) < 3: continue
                 
                 rsi_sebelumnya = df['rsi'].iloc[-2]
                 rsi_sekarang = df['rsi'].iloc[-1]
-                
-                macd_sebelumnya = df['macd'].iloc[-2]
-                signal_sebelumnya = df['signal'].iloc[-2]
-                macd_sekarang = df['macd'].iloc[-1]
-                signal_sekarang = df['signal'].iloc[-1]
                 
                 harga_sekarang = df['close'].iloc[-1]
                 open_terakhir = df['open'].iloc[-1]
@@ -73,29 +59,24 @@ def scan_pasar_long():
                 vol_rata2 = df['volume'].iloc[:-1].mean()
                 vol_terakhir = df['volume'].iloc[-1]
                 
-                # --- KRITERIA REVERSAL LONG ---
-                # A. Kondisi RSI: Sempat di bawah 32 (Oversold), lalu berbalik naik menembus ke atas
-                kondisi_rsi = (rsi_sebelumnya <= 32) and (rsi_sekarang > rsi_sebelumnya)
+                # --- KRITERIA LONG REBOUND DIPERBAIKI ---
+                # A. RSI mulai bergerak naik (RSI naik dari sebelumnya, tidak harus di bawah 32 agar koin yang baru mau naik ketangkap)
+                kondisi_rsi_naik = (rsi_sekarang > rsi_sebelumnya) and (rsi_sekarang < 60)
                 
-                # B. Kondisi MACD: Terjadi Crossover Positif (MACD memotong ke atas garis signal)
-                kondisi_macd = (macd_sebelumnya <= signal_sebelumnya) and (macd_sekarang > signal_sekarang)
+                # B. Harga menguat (Close > Open) atau ada lonjakan volume pembelian
+                kondisi_momentum = (harga_sekarang > open_terakhir) or (vol_terakhir > vol_rata2 * 1.2)
                 
-                # C. Kondisi Volume & Harga: Volume lonjakan beli / Rejection bawah (Close > Open atau Volume tinggi)
-                kondisi_rejection = (harga_sekarang > open_terakhir) or (vol_terakhir > vol_rata2 * 1.3)
-                
-                # Jika syarat RSI Oversold berbalik naik terpenuhi didukung konfirmasi MACD atau Rejection bawah
-                if kondisi_rsi and (kondisi_rejection or kondisi_macd):
+                if kondisi_rsi_naik and kondisi_momentum:
                     entry = harga_sekarang
-                    sl = low_terakhir * 0.992  # Stop loss sedikit di bawah titik terendah
+                    sl = low_terchakrair = low_terakhir * 0.992 # Stop loss tipis di bawah low
                     risiko = entry - sl
                     if risiko <= 0: continue
                     tp1 = entry + (risiko * 1.5)
                     tp2 = entry + (risiko * 2.5)
                     
-                    teks = (f"🚀 *SINYAL LONG CRYPTO REVERSAL* 🚀\n"
+                    teks = (f"🚀 *SINYAL LONG REBOUND CRYPTO* 🚀\n"
                             f"• Aset: `{symbol}`\n"
-                            f"• RSI: `{rsi_sebelumnya:.1f}` ➔ `{rsi_sekarang:.1f}`\n"
-                            f"• MACD Cross: `{'Ya 📈' if kondisi_macd else 'Tidak'}`\n"
+                            f"• RSI: `{rsi_sebelumnya:.1f}` ➔ `{rsi_sekarang:.1f}` (Naik)\n"
                             f"• Entry: `{entry:.4f}`\n"
                             f"• Stop Loss: `{sl:.4f}`\n"
                             f"• TP1: `{tp1:.4f}` | TP2: `{tp2:.4f}`")
@@ -111,7 +92,7 @@ def scan_pasar_long():
         for item in sinyal_ditemukan:
             kirim_telegram(item)
     else:
-        kirim_telegram(f"🤖 *Scan Update LONG ({waktu_sekarang}):* Belum ada koin crypto yang menyentuh kriteria pembalikan Oversold.")
+        kirim_telegram(f"🤖 *Scan Update LONG ({waktu_sekarang}):* Belum ada koin yang memenuhi syarat pantulan.")
 
 if __name__ == "__main__":
-    scan_pasar_long()
+    scan_pasar_long_diperbaiki()
