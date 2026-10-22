@@ -1,26 +1,36 @@
-name: Auto Scan Crypto LONG 15 Min
+name: Radar Long
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # Berjalan otomatis setiap 15 menit
-  workflow_dispatch: # Agar bisa ditekan/run manual dari menu Actions GitHub
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: radar-long
+  cancel-in-progress: false
 
 jobs:
-  run-long-scanner:
+  scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 6
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+      - name: Scan long dan kirim ke Telegram
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOURCE: bitget
+          MODAL_USDT: "100"
+          RISK_PCT: "2"
+        run: python3 long_bot.py scan
 
-      - name: Install Dependencies
+      - name: Simpan state anti-spam
         run: |
-          pip install ccxt pandas requests
-
-      - name: Run Scanner Script
-        run: |
-          python scanner.py
+          git config user.name "radar-bot"
+          git config user.email "radar-bot@users.noreply.github.com"
+          git add long_state.json
+          git diff --cached --quiet || (git commit -m "update state" && git push)
