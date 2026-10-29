@@ -1,16 +1,21 @@
 """
-Scanner BTC futures (Bitget) - Liquidity Sweep + Order Block + Fibonacci
-Bias 1H, entry zone 15m. Kirim sinyal LONG/SHORT ke Telegram.
+Scanner futures (Bitget) - Liquidity Sweep + Order Block + Fibonacci
+Mode scalping: bias 15m, entry zone 5m. Pair: BTC, ETH, XRP, SOL.
+Kirim sinyal LONG/SHORT ke Telegram.
 
 Env:
   TG_TOKEN, TG_CHAT_ID   (wajib untuk kirim Telegram)
-  SYMBOL (default BTCUSDT), MIN_RR (default 2.0)
+  SYMBOLS (default BTCUSDT,ETHUSDT,XRPUSDT,SOLUSDT), MIN_RR (default 1.5)
 """
 import os
 import json
 import requests
 
-SYMBOL = os.getenv("SYMBOL", "BTCUSDT")
+SYMBOLS = [x.strip() for x in os.getenv(
+    "SYMBOLS", "BTCUSDT,ETHUSDT,XRPUSDT,SOLUSDT").split(",") if x.strip()]
+ENTRY_TF = "5m"    # timeframe entry (OB, sweep, fib)
+BIAS_TF = "15m"    # timeframe arah
+MIN_RISK_PCT = 0.0015  # jarak SL minimal 0.15% agar tidak habis kena fee
 MIN_RR = float(os.getenv("MIN_RR", "1.5"))
 TG_TOKEN = os.getenv("TG_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
@@ -23,9 +28,9 @@ ATR_BUFFER = 0.15  # buffer SL = 0.15 ATR
 FIB_TOP, FIB_BOT = 0.5, 0.886  # zona fib dilonggarkan
 
 
-def fetch(gran, limit=300):
+def fetch(symbol, gran, limit=300):
     r = requests.get(URL, params={
-        "symbol": SYMBOL, "productType": "USDT-FUTURES",
+        "symbol": symbol, "productType": "USDT-FUTURES",
         "granularity": gran, "limit": limit}, timeout=15)
     r.raise_for_status()
     d = r.json()
@@ -130,7 +135,7 @@ def find_long(c15, c1h):
         tp2 = leg_high
         tp3 = leg_low + 1.272 * R
         risk = entry - sl
-        if risk <= 0:
+        if risk <= 0 or risk / entry < MIN_RISK_PCT:
             continue
         rr = (tp2 - entry) / risk
         if rr < MIN_RR:
@@ -143,20 +148,22 @@ def find_long(c15, c1h):
     return None
 
 
-def scan():
-    c15, c1h = fetch("15m"), fetch("1H")
+def scan(symbol):
+    c15, c1h = fetch(symbol, ENTRY_TF), fetch(symbol, BIAS_TF)
     out = []
     lg = find_long(c15, c1h)
     if lg:
         lg["side"] = "LONG"
-        lg["key"] = "L" + lg["key"]
+        lg["symbol"] = symbol
+        lg["key"] = f"{symbol}-L" + lg["key"]
         out.append(lg)
     sh = find_long(flip(c15), flip(c1h))
     if sh:
         for f in ("entry", "sl", "tp1", "tp2", "tp3", "price"):
             sh[f] = -sh[f]
         sh["side"] = "SHORT"
-        sh["key"] = "S" + sh["key"]
+        sh["symbol"] = symbol
+        sh["key"] = f"{symbol}-S" + sh["key"]
         out.append(sh)
     return out
 
@@ -164,7 +171,7 @@ def scan():
 def fmt(s):
     e = "🟢" if s["side"] == "LONG" else "🔴"
     return (
-        f"{e} {s['side']} {SYMBOL} (limit order)\n"
+        f"{e} {s['side']} {s['symbol']} (limit order, scalping)\n"
         f"Harga sekarang: {s['price']:.1f}\n"
         f"Entry : {s['entry']:.1f}\n"
         f"SL    : {s['sl']:.1f}\n"
@@ -172,29 +179,40 @@ def fmt(s):
         f"TP2   : {s['tp2']:.1f}\n"
         f"TP3   : {s['tp3']:.1f}\n"
         f"RR (ke TP2): 1:{s['rr']:.1f}\n"
-        f"Setup: sweep liquidity + order block + fib 0.5-0.886 (bias 1H searah)\n"
+        f"Setup: sweep liquidity + order block + fib 0.5-0.886 (bias 15m searah)\n"
         f"Bukan saran finansial. Pakai risiko kecil per trade."
     )
 
 
 def send(text):
     if not TG_TOKEN or not TG_CHAT_ID:
+        print("ERROR: secret TG_TOKEN / TG_CHAT_ID kosong atau salah nama")
         print(text)
-        return
-    requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                  data={"chat_id": TG_CHAT_ID, "text": text}, timeout=15)
+        raise SystemExit(1)
+    r = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                      data={"chat_id": TG_CHAT_ID, "text": text}, timeout=15)
+    if not r.ok:
+        print("ERROR Telegram:", r.status_code, r.text)
+        raise SystemExit(1)
+    print("Telegram terkirim")
 
 
 def status():
-    c15, c1h = fetch("15m"), fetch("1H")
-    if bias_up(c1h):
-        bias = "NAIK (cari LONG)"
-    elif bias_up(flip(c1h)):
-        bias = "TURUN (cari SHORT)"
-    else:
-        bias = "NETRAL (menunggu)"
-    return (f"✅ Bot aktif\n{SYMBOL}: {c15[-1]['c']:.1f}\nBias 1H: {bias}\n"
-            f"Scan jalan tiap 15 menit. Sinyal dikirim hanya kalau setup lengkap muncul.")
+    lines = ["✅ Bot aktif"]
+    for sym in SYMBOLS:
+        try:
+            c5, c15 = fetch(sym, ENTRY_TF), fetch(sym, BIAS_TF)
+            if bias_up(c15):
+                b = "NAIK"
+            elif bias_up(flip(c15)):
+                b = "TURUN"
+            else:
+                b = "NETRAL"
+            lines.append(f"{sym}: {c5[-1]['c']:.4f} | bias 15m {b}")
+        except Exception as ex:
+            lines.append(f"{sym}: gagal ambil data ({ex})")
+    lines.append("Scan tiap 5 menit. Sinyal dikirim hanya kalau setup lengkap muncul.")
+    return "\n".join(lines)
 
 
 def main():
@@ -207,14 +225,20 @@ def main():
     except Exception:
         sent = set()
 
-    for s in scan():
-        if s["key"] in sent:
+    for sym in SYMBOLS:
+        try:
+            sigs = scan(sym)
+        except Exception as ex:
+            print(f"{sym}: gagal scan: {ex}")
             continue
-        send(fmt(s))
-        sent.add(s["key"])
+        for s in sigs:
+            if s["key"] in sent:
+                continue
+            send(fmt(s))
+            sent.add(s["key"])
 
     with open(STATE_FILE, "w") as f:
-        json.dump({"keys": sorted(sent)[-20:]}, f)
+        json.dump({"keys": sorted(sent)[-60:]}, f)
 
 
 if __name__ == "__main__":
