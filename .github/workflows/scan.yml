@@ -2,7 +2,7 @@ name: BTC Scanner
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -28,6 +28,7 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          SYMBOLS: "BTCUSDT,ETHUSDT,XRPUSDT,SOLUSDT"
         run: python btc_scanner.py
 
       - name: Simpan state sinyal
