@@ -16,16 +16,16 @@ SYMBOLS = [x.strip() for x in os.getenv(
 ENTRY_TF = "5m"    # timeframe entry (OB, sweep, fib)
 BIAS_TF = "15m"    # timeframe arah
 MIN_RISK_PCT = 0.0015  # jarak SL minimal 0.15% agar tidak habis kena fee
-MIN_RR = float(os.getenv("MIN_RR", "1.5"))
+MIN_RR = float(os.getenv("MIN_RR", "1.3"))
 TG_TOKEN = os.getenv("TG_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 STATE_FILE = "last_signal.json"
 URL = "https://api.bitget.com/api/v2/mix/market/candles"
 
-PIVOT_N = 3        # kiri-kanan candle untuk swing high/low
-LOOKBACK = 48      # sweep dicari di 48 candle 15m terakhir (~12 jam)
+PIVOT_N = 2        # kiri-kanan candle untuk swing high/low
+LOOKBACK = 60      # setup dicari di 60 candle 5m terakhir (~5 jam)
 ATR_BUFFER = 0.15  # buffer SL = 0.15 ATR
-FIB_TOP, FIB_BOT = 0.5, 0.886  # zona fib dilonggarkan
+FIB_TOP, FIB_BOT = 0.382, 0.886  # zona fib lebar untuk scalping
 
 
 def fetch(symbol, gran, limit=300):
@@ -76,12 +76,14 @@ def ema(vals, n):
 
 
 def bias_up(cs1h):
-    """Bias naik: close 1H di atas EMA50 dan EMA50 sedang naik."""
+    """Bias naik: close 15m di atas EMA50 dan EMA50 tidak sedang turun."""
     e = ema([c["c"] for c in cs1h], 50)
-    return cs1h[-1]["c"] > e[-1] and e[-1] > e[-6]
+    return cs1h[-1]["c"] > e[-1] and e[-1] >= e[-5]
 
 
 def find_long(c15, c1h):
+    """Setup long: bias naik + impuls menembus struktur (BOS) + pullback ke OB/fib.
+    Sweep liquidity bersifat bonus (ditandai di pesan), bukan syarat wajib."""
     if not bias_up(c1h):
         return None
     highs, lows = pivots(c15, "h"), pivots(c15, "l")
@@ -89,62 +91,57 @@ def find_long(c15, c1h):
     a = atr(c15)
     price = c15[last]["c"]
 
-    for s in range(last, max(last - LOOKBACK, 1), -1):
-        # 1) liquidity sweep: wick tembus swing low, close kembali di atasnya
-        pl = [p for p in lows if p[0] < s and s - p[0] <= 60]
-        if not pl:
-            continue
-        ref = pl[-1][1]
-        if not (c15[s]["l"] < ref and c15[s]["c"] > ref):
-            continue
-
-        # 2) BOS: close di atas swing high sebelum sweep
-        ph = [p for p in highs if p[0] < s]
-        if not ph:
-            continue
-        bos = ph[-1][1]
-        k = next((j for j in range(s + 1, last + 1) if c15[j]["c"] > bos), None)
+    # kandidat low awal impuls: swing low terbaru dulu
+    for s_idx, s_low in reversed([p for p in lows if last - p[0] <= LOOKBACK]):
+        # BOS: close di atas swing high sebelum low ini
+        ph = [p for p in highs if p[0] < s_idx]
+        if ph:
+            bos = ph[-1][1]
+        else:
+            bos = max(c["h"] for c in c15[max(0, s_idx - 10):s_idx + 1])
+        k = next((j for j in range(s_idx + 1, last + 1) if c15[j]["c"] > bos), None)
         if k is None:
             continue
 
-        # leg: low sweep -> high tertinggi setelahnya
-        leg_low = c15[s]["l"]
-        if min(c["l"] for c in c15[s:]) < leg_low:
+        leg_low = s_low
+        if min(c["l"] for c in c15[s_idx:]) < leg_low:
             continue  # low baru terbentuk, setup batal
-        leg_high = max(c["h"] for c in c15[s:])
+        leg_high = max(c["h"] for c in c15[s_idx:])
         R = leg_high - leg_low
-        if R < 0.5 * a:
+        if R < 0.4 * a:
             continue
 
-        # 3) order block: candle bearish terakhir sebelum impuls
-        bears = [j for j in range(s, k) if c15[j]["c"] < c15[j]["o"]]
-        if not bears:
-            continue
-        ob = c15[bears[-1]]
+        # order block: candle bearish terakhir sebelum impuls (fallback: candle low itu)
+        bears = [j for j in range(s_idx, k) if c15[j]["c"] < c15[j]["o"]]
+        ob = c15[bears[-1]] if bears else c15[s_idx]
 
-        # 4) zona fib 0.618-0.786 harus overlap dengan OB
+        # entry: overlap OB dengan zona fib; kalau tidak ada, pakai fib 0.618
         z_hi = leg_high - FIB_TOP * R
         z_lo = leg_high - FIB_BOT * R
         ov_lo, ov_hi = max(ob["l"], z_lo), min(ob["h"], z_hi)
         if ov_lo < ov_hi:
-            entry = (ov_lo + ov_hi) / 2      # OB overlap fib
+            entry = (ov_lo + ov_hi) / 2
         else:
-            entry = (z_hi + z_lo) / 2        # tanpa overlap: tengah zona fib
+            entry = leg_high - 0.618 * R
+
         sl = min(leg_low, ob["l"]) - ATR_BUFFER * a
-        tp1 = leg_high - 0.5 * R
         tp2 = leg_high
         tp3 = leg_low + 1.272 * R
+        tp1 = entry + (tp2 - entry) / 2
         risk = entry - sl
         if risk <= 0 or risk / entry < MIN_RISK_PCT:
             continue
         rr = (tp2 - entry) / risk
         if rr < MIN_RR:
             continue
-        if price <= sl or price > tp1:
-            continue  # sudah invalid / harga sudah lari
+        # sinyal hanya jika harga masih dekat entry dan belum invalid
+        if price <= sl or price > entry + 1.0 * a:
+            continue
 
-        return dict(key=str(c15[s]["t"]), entry=entry, sl=sl, tp1=tp1,
-                    tp2=tp2, tp3=tp3, rr=rr, price=price)
+        prev_lows = [p for p in lows if p[0] < s_idx]
+        sweep = bool(prev_lows) and leg_low < prev_lows[-1][1]
+        return dict(key=str(c15[s_idx]["t"]), entry=entry, sl=sl, tp1=tp1,
+                    tp2=tp2, tp3=tp3, rr=rr, price=price, sweep=sweep)
     return None
 
 
@@ -179,7 +176,7 @@ def fmt(s):
         f"TP2   : {s['tp2']:.1f}\n"
         f"TP3   : {s['tp3']:.1f}\n"
         f"RR (ke TP2): 1:{s['rr']:.1f}\n"
-        f"Setup: sweep liquidity + order block + fib 0.5-0.886 (bias 15m searah)\n"
+        f"Setup: BOS + order block + fib{' + sweep liquidity' if s.get('sweep') else ''} (bias 15m searah)\n"
         f"Bukan saran finansial. Pakai risiko kecil per trade."
     )
 
